@@ -1,0 +1,1422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#040405">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bubble Board">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23040405'/%3E%3Crect x='10' y='10' width='26' height='44' rx='8' fill='none' stroke='%23eef0f3' stroke-width='3'/%3E%3Crect x='40' y='10' width='14' height='20' rx='5' fill='none' stroke='%23eef0f3' stroke-width='3'/%3E%3Crect x='40' y='34' width='14' height='20' rx='5' fill='none' stroke='%23eef0f3' stroke-width='3'/%3E%3C/svg%3E">
+<title>Bubble Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Layout: a tiling bubble screen. The page is a tree of rows and columns that always fills the viewport; black bubbles are its leaves, white outlines are grouped branches. Dividers resize neighbours; drops split or swap. Phones stack. Monochrome by design. */
+:root{
+  color-scheme:dark;
+  --bg:#040405;
+  --panel:#0d0e11; --panel-h:#101115; --line:#191b20; --line-2:#2a2d34;
+  --ink:#eef0f3; --soft:#b9bec7; --muted:#7d838e; --faint:#4a4f58;
+  --group:rgba(255,255,255,.85);
+  --bad:#ff8a80; --warn:#f5c27a;
+  --gap:8px;
+  --display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --body:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);height:100%}
+body{color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.5;display:flex;flex-direction:column}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:1.5px solid var(--soft);outline-offset:2px;border-radius:5px}
+
+.top{flex:none;display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding-block:9px;padding-left:max(14px,env(safe-area-inset-left,0px));padding-right:max(14px,env(safe-area-inset-right,0px))}
+.top h1{font-family:var(--display);font-weight:500;font-size:15px;margin:0;letter-spacing:-.01em;cursor:text;min-width:0;overflow-wrap:break-word;hyphens:auto;border-radius:6px;padding:1px 4px;margin-left:-4px;transition:background .15s}
+.top h1:hover{background:var(--line)}
+.top h1 .edit{font:inherit;min-width:220px}
+.top .meta{display:flex;gap:12px;align-items:center;font-family:var(--mono);font-size:11px;color:var(--muted);margin-left:auto}
+.status[data-s="saving"]{color:var(--warn)} .status[data-s="error"]{color:var(--bad)}
+.newbtn{border:1px solid var(--line-2);background:none;border-radius:999px;padding:2px 11px;font-size:12px;color:var(--soft);font-family:var(--body)}
+.newbtn:hover{color:var(--ink);border-color:var(--muted)}
+.newb>button{border:1px solid var(--line-2);background:none;border-radius:999px;padding:2px 11px;font-size:12px;color:var(--soft);font-family:var(--body)}
+.newb>button:hover{color:var(--ink);border-color:var(--muted)}
+.pop{position:absolute;right:0;top:calc(100% + 6px);z-index:100;background:#111216;border:1px solid var(--line-2);border-radius:12px;padding:4px;display:flex;flex-direction:column;min-width:160px}
+.pop button{border:0;background:none;text-align:left;padding:6px 10px;border-radius:8px;font-size:13px;color:var(--soft);font-family:var(--body)}
+.pop button:hover{background:var(--line);color:var(--ink)}
+.pop hr{border:0;border-top:1px solid var(--line-2);margin:4px 6px}
+
+/* the screen */
+.screen{flex:1;min-height:0;display:flex;padding-block:0 max(10px,env(safe-area-inset-bottom,0px));padding-left:max(10px,env(safe-area-inset-left,0px));padding-right:max(10px,env(safe-area-inset-right,0px))}
+.split{display:flex;min-width:0;min-height:0;position:relative}
+.split.row{flex-direction:row;align-items:stretch} .split.col{flex-direction:column}
+.screen>.split{flex:1}
+.split.group{border:1.5px solid var(--group);border-radius:24px;padding:9px;cursor:grab;transition:box-shadow .2s}
+.split.group:hover{box-shadow:0 0 0 4px rgba(255,255,255,.05)}
+.split.group.lifted{cursor:grabbing}
+.gtools{position:absolute;top:-10px;right:22px;z-index:5;display:flex;gap:6px;visibility:hidden;opacity:0;transition:opacity .15s,visibility 0s .15s}
+.gtools button{border:1px solid var(--group);background:var(--bg);color:var(--ink);border-radius:999px;font-size:11px;padding:0 8px;line-height:18px;cursor:pointer}
+.gtools button:hover{background:var(--ink);color:var(--bg)}
+.split.group:hover>.gtools,.gtools:focus-within{visibility:visible;opacity:1;transition:opacity .15s}
+.split.group.lifted>.gtools{visibility:hidden}
+@media (hover:none){.gtools{visibility:visible;opacity:.8}}
+
+.divider{flex:none;position:relative;z-index:3;touch-action:none}
+.split.row>.divider{width:var(--gap);cursor:col-resize}
+.split.col>.divider{height:var(--gap);cursor:row-resize}
+.divider::after{content:"";position:absolute;border-radius:2px;background:var(--soft);opacity:0;transition:opacity .15s}
+.split.row>.divider::after{top:50%;left:2.5px;width:3px;height:34px;margin-top:-17px}
+.split.col>.divider::after{left:50%;top:2.5px;height:3px;width:34px;margin-left:-17px}
+.divider:hover::after,.divider.on::after{opacity:.6}
+
+/* bubbles */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;min-width:0;min-height:0;overflow:hidden;
+  display:flex;flex-direction:column;padding:13px 15px 11px;gap:8px;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;
+  transition:border-color .15s,background .15s,box-shadow .2s}
+.panel:hover{border-color:var(--line-2);background:var(--panel-h)}
+.panel.lifted{cursor:grabbing;z-index:50;box-shadow:0 24px 70px rgba(0,0,0,.75),0 0 0 1px var(--line-2);opacity:.92}
+.split.group.lifted{z-index:50;opacity:.85}
+.panel.pressing{border-color:var(--muted)}
+.panel.popin{animation:popin .38s cubic-bezier(.2,.9,.25,1.15)}
+@keyframes popin{from{transform:scale(.82);opacity:0}}
+:is(.panel) :is(.t,.ptitle,.stitle,.nt,.gt,.gw,input,textarea){user-select:text;-webkit-user-select:text;cursor:text}
+.panel :is(button,.ck){cursor:pointer}
+.body{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;flex:1;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;margin-right:-6px;padding-right:6px;margin-left:-14px;padding-left:14px}
+
+.ph{display:flex;align-items:baseline;gap:10px;flex:none}
+.ptitle{font-family:var(--display);font-weight:500;font-size:1.15em;line-height:1.25;min-width:0;overflow-wrap:break-word;hyphens:auto;margin:0;letter-spacing:-.005em}
+.pmeta{font-size:.82em;color:var(--faint);white-space:nowrap;font-variant-numeric:tabular-nums;margin-left:auto;padding-left:6px}
+.gear{border:0;background:none;color:var(--muted);border-radius:6px;padding:0 4px;font-size:15px;line-height:1;letter-spacing:1px;opacity:0;transition:opacity .15s;align-self:center}
+.panel:hover .gear,.gear[aria-expanded="true"],.gear:focus-visible{opacity:1}
+@media (hover:none){.gear{opacity:.8}}
+.prog{height:1px;background:var(--line);flex:none;margin:-2px 0 2px}
+.prog i{display:block;height:100%;background:var(--soft);opacity:.55}
+
+.panel{position:relative;container-type:inline-size;container-name:bubble}
+/* text follows the bubble: ~12px in a slim bubble, up to ~17px in a wide one; titles scale a little faster */
+.panel>.ph,.panel>.body{font-size:clamp(12px,1.25cqi + 9.5px,17px)}
+.panel>.ph .ptitle{font-size:clamp(13px,2.2cqi + 8px,23px)}
+.ph{position:relative}
+.tools{position:absolute;top:-3px;right:-6px;display:flex;gap:2px;padding:2px 4px;border-radius:8px;background:var(--panel-h);opacity:0;transition:opacity .15s;font-size:14px}
+.panel:hover .tools,.tools:focus-within,.tools.open{opacity:1}
+.panel:hover .pmeta,.panel:has(.tools.open) .pmeta{visibility:hidden}
+@media (hover:none){.panel:hover .pmeta{visibility:visible}}
+@media (hover:none){.tools{opacity:.85}}
+.tools .gear{opacity:1}
+@container bubble (max-width:230px){ .pmeta{display:none} .panel>.body{gap:7px} .drow{flex-wrap:wrap;gap:0 8px} .when{min-width:0} .src{flex-basis:100%} }
+@container bubble (max-width:150px){ .item{gap:6px} .item .d,.note .nf .d{display:none} .gw{display:none} }
+.stretch{position:absolute;z-index:4;touch-action:none}
+.stretch.top,.stretch.bottom{left:50%;width:64px;margin-left:-32px;height:12px;cursor:ns-resize}
+.stretch.top{top:0} .stretch.bottom{bottom:0}
+.stretch.left,.stretch.right{top:50%;height:64px;margin-top:-32px;width:12px;cursor:ew-resize}
+.stretch.left{left:0} .stretch.right{right:0}
+.stretch::after{content:"";position:absolute;background:var(--muted);border-radius:2px;opacity:0;transition:opacity .15s}
+.stretch.top::after,.stretch.bottom::after{left:16px;right:16px;height:3px;top:4.5px}
+.stretch.left::after,.stretch.right::after{top:16px;bottom:16px;width:3px;left:4.5px}
+.panel:hover>.stretch::after{opacity:.55}
+.stretch:hover::after,.stretch.on::after{opacity:1;background:var(--ink)}
+.panel.lifted>.stretch{display:none}
+.item,.note{position:relative}
+.igrip{position:absolute;z-index:6;left:-13px;top:.2em;width:11px;font-size:11px;line-height:1.4;letter-spacing:-3px;color:var(--faint);cursor:grab;opacity:0;transition:opacity .15s;touch-action:none;user-select:none;-webkit-user-select:none}
+:is(.item,.note):hover>.igrip{opacity:1}
+.igrip:hover{color:var(--ink)}
+@media (hover:none){.igrip{opacity:.5}}
+:is(.item,.note).dragging{opacity:.3}
+.iline{position:fixed;z-index:45;height:2px;border-radius:1px;background:var(--ink);pointer-events:none;display:none;box-shadow:0 0 6px rgba(255,255,255,.4)}
+.iline.on{display:block}
+.adder{flex-wrap:wrap}
+.adder input[type=text],.adder textarea{flex:1 1 9em}
+.dchips{display:flex;gap:4px;flex:none;flex-wrap:wrap}
+.dchip{border:1px solid var(--line-2);background:none;border-radius:999px;padding:0 9px;line-height:20px;font-size:.8em;color:var(--muted);white-space:nowrap}
+.dchip:hover{border-color:var(--muted);color:var(--ink)}
+.dchip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.due-btn,.when.btn{border:0;background:none;padding:0 3px;margin-left:-3px;border-radius:5px;line-height:1.5;cursor:pointer;text-align:left}
+.due-btn:hover,.when.btn:hover{background:var(--line);color:var(--ink)}
+.add-due{opacity:0;transition:opacity .15s}
+:is(.item,.note):hover .add-due,.add-due:focus-visible{opacity:1}
+@media (hover:none){.add-due{opacity:.5}}
+.duepop{position:fixed;z-index:300;width:244px;background:#111216;border:1px solid var(--line-2);border-radius:14px;padding:10px;box-shadow:0 18px 50px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--soft);user-select:none;-webkit-user-select:none}
+.dq{display:flex;gap:6px;align-items:center}
+.dq button{border:1px solid var(--line-2);background:none;border-radius:999px;padding:0 11px;line-height:24px;font-size:12px;color:var(--soft)}
+.dq button:hover{border-color:var(--muted);color:var(--ink)}
+.dq button.on{background:var(--ink);border-color:var(--ink);color:var(--bg)}
+.dq .dclear{margin-left:auto;border-color:transparent;color:var(--bad)}
+.dq .dclear:hover{border-color:transparent;color:var(--bad);background:var(--line)}
+.dm{display:flex;align-items:center;justify-content:space-between;color:var(--ink);font-size:13px}
+.dnav{border:0;background:none;color:var(--muted);font-size:17px;line-height:1;width:28px;height:28px;border-radius:8px}
+.dnav:hover{background:var(--line);color:var(--ink)}
+.dg{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.dw{font-size:10.5px;color:var(--faint);padding:2px 0}
+.dd{border:0;background:none;border-radius:8px;height:29px;font-size:12.5px;color:var(--soft);font-variant-numeric:tabular-nums}
+.dd:hover{background:var(--line);color:var(--ink)}
+.dd.past{color:var(--faint)}
+.dd.today{box-shadow:inset 0 0 0 1px var(--muted);color:var(--ink)}
+.dd.sel{background:var(--ink);color:var(--bg);box-shadow:none}
+.bul{color:var(--muted);flex:none;width:.7em;line-height:inherit;text-align:center}
+.note>.bul{position:absolute;left:-1em;top:0}
+.notes:has(.bul) .note{padding-left:1em}
+.notes:has(.bul) .note>.bul{left:0}
+.panel.droptarget{border-color:var(--soft);box-shadow:0 0 0 1px var(--soft)}
+.ighost{position:fixed;left:0;top:0;z-index:400;pointer-events:none;max-width:260px;padding:5px 10px;border-radius:9px;background:#16181d;border:1px solid var(--line-2);color:var(--ink);font-size:13px;box-shadow:0 12px 30px rgba(0,0,0,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.indicator{position:fixed;z-index:40;pointer-events:none;border:1.5px dashed var(--soft);background:rgba(255,255,255,.06);border-radius:18px;transition:left .12s,top .12s,width .12s,height .12s,opacity .12s;opacity:0}
+.indicator.on{opacity:1}
+
+/* settings */
+.drawer{padding:2px 0 6px;display:flex;flex-direction:column;gap:10px;cursor:default;flex:0 1 auto;min-height:70px;max-height:55%;overflow:auto;scrollbar-width:thin}
+.body{min-height:48px}
+.pgroup{display:flex;flex-direction:column;gap:3px}
+.lbl{font-size:11px;color:var(--faint);letter-spacing:.02em}
+.switches{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:2px 14px}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:8px;border:0;background:none;padding:2px 0;font-size:12.5px;color:var(--muted);text-align:left}
+.sw i{width:24px;height:14px;border-radius:7px;background:var(--line-2);position:relative;flex:none;transition:background .15s}
+.sw i::after{content:"";position:absolute;top:2px;left:2px;width:10px;height:10px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+.sw[aria-checked="true"]{color:var(--soft)}
+.sw[aria-checked="true"] i{background:rgba(255,255,255,.28)}
+.sw[aria-checked="true"] i::after{transform:translateX(10px);background:var(--ink)}
+.hrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.seg{border:1px solid var(--line-2);background:none;border-radius:999px;padding:0 9px;font-size:12px;color:var(--muted);line-height:20px}
+.seg:hover{color:var(--ink);border-color:var(--muted)}
+.seg[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.danger{margin-left:auto;border:0;color:var(--bad);background:none;padding:0 2px;font-size:12px;opacity:.8}
+
+/* inside a bubble */
+.sec{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sh{display:flex;align-items:center;gap:6px}
+.caret{border:0;background:none;color:var(--faint);padding:0;width:14px;font-size:10px;line-height:1;transition:transform .15s}
+.caret[aria-expanded="false"]{transform:rotate(-90deg)}
+.stitle{font-size:.9em;color:var(--muted);overflow-wrap:break-word;hyphens:auto}
+.sh .scount{font-size:.8em;color:var(--faint)}
+.sh .x{margin-left:auto}
+ul.items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px}
+.item{display:flex;align-items:flex-start;gap:10px;padding:2px 0;min-width:0;transition:opacity .2s}
+.ck{appearance:none;-webkit-appearance:none;width:15px;height:15px;border-radius:50%;border:1.5px solid var(--faint);margin:3px 0 0;flex:none;background:none;position:relative;transition:background .12s,border-color .12s}
+.ck:hover{border-color:var(--soft)}
+.ck:checked{background:var(--soft);border-color:var(--soft)}
+.ck:checked::after{content:"";position:absolute;left:4px;top:1.5px;width:4px;height:7px;border:solid var(--bg);border-width:0 1.8px 1.8px 0;transform:rotate(45deg)}
+.item .ix{display:flex;flex-direction:column;min-width:0;flex:0 1 auto}
+.item .t{min-width:0;overflow-wrap:break-word;hyphens:auto;color:var(--ink)}
+.item .n,.note .n{font-size:.85em;color:var(--faint);margin-top:1px;font-variant-numeric:tabular-nums;min-width:12px}
+.gw{color:var(--muted);font-size:.9em;overflow-wrap:break-word;hyphens:auto}
+.gw.ph-sub{color:var(--faint);opacity:0;transition:opacity .15s}
+:is(.item,.note):hover .gw.ph-sub{opacity:1}
+@media (hover:none){.gw.ph-sub{opacity:.6}}
+.feed{display:flex;flex-direction:column;gap:2px}
+.item .d+.x{margin-left:0}
+.item .ix+.x,.item .ix+.d{margin-left:auto}
+.item.done{opacity:.45}
+.item.done .t{text-decoration:line-through;text-decoration-color:var(--faint)}
+.d{font-size:.8em;color:var(--faint);white-space:nowrap;margin-top:2px}
+.d.over{color:var(--bad)} .d.soon{color:var(--warn)}
+.x{border:0;background:none;color:var(--faint);padding:0 3px;border-radius:5px;font-size:1em;line-height:1.4;opacity:0;flex:none}
+.item .x{margin-left:auto}
+:is(.item,.sh,.note,.goal):hover .x,.x:focus-visible,.x.arm{opacity:1}
+.x.arm{color:var(--bad);font-size:.8em}
+@media (hover:none){.x{opacity:.55}}
+.x:hover{color:var(--bad)}
+
+.addline{border:0;background:none;color:var(--faint);font-size:.92em;padding:2px 0;text-align:left;align-self:flex-start;opacity:0;transition:opacity .15s,color .15s}
+.panel:hover .addline,.addline:focus-visible,.sec.empty-sec .addline{opacity:1}
+@media (hover:none){.addline{opacity:1}}
+.addline:hover{color:var(--soft)}
+.adder{display:flex;gap:8px;align-items:center;padding:2px 0}
+.adder input[type=text],.adder textarea{flex:1;min-width:0;border:0;border-bottom:1px solid var(--line-2);background:none;padding:2px 0;font-size:1em;outline:none;resize:none}
+.adder :is(input[type=text],textarea):focus{border-bottom-color:var(--soft)}
+.adder input[type=date]{border:0;background:none;color:var(--muted);font-size:.8em;max-width:125px}
+.edit{width:100%;border:0;border-bottom:1px solid var(--soft);background:none;padding:0;outline:none;font:inherit;color:inherit}
+textarea.edit{resize:none;min-height:66px}
+.empty{color:var(--faint);font-size:.92em}
+
+.goals{display:flex;flex-direction:column;gap:8px}
+.goal{display:flex;gap:10px;min-width:0}
+.goal .n{font-size:12px;color:var(--faint);margin-top:2px;font-variant-numeric:tabular-nums}
+.goal .gx{display:flex;flex-direction:column;min-width:0;flex:0 1 auto}
+.goal .gt{font-size:15px;overflow-wrap:break-word;hyphens:auto}
+.goal .gw{color:var(--muted);font-size:.9em;overflow-wrap:break-word;hyphens:auto}
+.goal .x{margin-left:auto}
+
+.drow{display:flex;gap:12px;align-items:baseline;min-width:0}
+.when{font-size:.85em;color:var(--muted);min-width:5.2em;flex:none}
+.when.over{color:var(--bad)} .when.soon{color:var(--warn)}
+.what{min-width:0;overflow-wrap:break-word;hyphens:auto;flex:0 1 auto}
+.src{color:var(--faint);font-size:.85em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+
+.notes{columns:15em;column-gap:1.5em}
+.note{break-inside:avoid;display:flex;flex-direction:column;gap:2px;margin-bottom:12px;min-width:0}
+.note .nt{white-space:pre-wrap;overflow-wrap:break-word;hyphens:auto;color:var(--soft);font-size:1.03em;line-height:1.55}
+.notes.lined .note{border-left:1px solid var(--line-2);padding-left:10px}
+.note .nf{display:flex;gap:8px;align-items:center;font-size:.8em;color:var(--faint);min-height:16px}
+
+.placeholder-empty{margin:auto;border:1px dashed var(--line-2);border-radius:18px;padding:30px;text-align:center;color:var(--muted);max-width:420px}
+
+/* phones: one column, natural heights */
+@media (max-width:700px){
+  html,body{height:auto}
+  .screen{display:block}
+  .split,.split.row,.split.col{flex-direction:column;gap:var(--gap)}
+  .split>*{flex:none!important}
+  .divider,.stretch{display:none}
+  .split.group{cursor:default;padding:10px}
+  .panel{cursor:default;max-height:none}
+  .body{overflow:visible;flex:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* page basics */
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+[hidden]{display:none!important}
+#app{display:flex;flex-direction:column;flex:1;min-height:0}
+/* sign-in */
+.auth{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:var(--bg);
+  background-image:radial-gradient(rgba(255,255,255,.05) 1px,transparent 1.3px);background-size:22px 22px;padding:24px max(16px,env(safe-area-inset-left,0px)) 24px max(16px,env(safe-area-inset-right,0px))}
+.authcard{width:100%;max-width:360px;background:var(--panel);border:1px solid var(--line-2);border-radius:20px;padding:28px 26px 22px;display:flex;flex-direction:column;gap:14px}
+.brand{font-family:var(--display);font-weight:600;font-size:24px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+.brand i{width:14px;height:14px;border:1.5px solid var(--ink);border-radius:5px;display:inline-block}
+.authsub{margin:-6px 0 4px;color:var(--muted);font-size:14px}
+.authcard label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--muted)}
+.authcard input{background:var(--bg);border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font-size:15px;color:var(--ink);outline:none}
+.authcard input:focus{border-color:var(--soft)}
+.primary{background:var(--ink);color:var(--bg);border:0;border-radius:10px;padding:11px 14px;font-size:14.5px;font-weight:500;margin-top:4px}
+.primary:disabled{opacity:.5;cursor:default}
+.authmsg{font-size:13px;color:var(--muted);min-height:1.2em}
+.authmsg.err{color:var(--bad)} .authmsg.ok{color:#9fe0b4}
+.authlinks{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.authlinks button{border:0;background:none;color:var(--muted);font-size:13px;padding:2px 0}
+.authlinks button:hover{color:var(--ink)}
+/* account menu */
+.acct{position:relative}
+.acctbtn{width:24px;height:24px;border-radius:50%;border:1px solid var(--line-2);background:none;color:var(--soft);font-size:11.5px;font-family:var(--body);text-transform:uppercase;padding:0}
+.acctbtn:hover{border-color:var(--muted);color:var(--ink)}
+.acct .pop{min-width:220px}
+.acct .who{padding:6px 10px 8px;color:var(--faint);font-size:12px;border-bottom:1px solid var(--line-2);margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--body)}
+/* one-off notice under the top bar */
+.notice{flex:none;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 max(10px,env(safe-area-inset-right,0px)) 8px max(10px,env(safe-area-inset-left,0px));padding:8px 12px;border:1px solid var(--line-2);border-radius:12px;color:var(--soft);font-size:13px}
+.notice .seg{line-height:22px}
+.notice .x{opacity:1;margin-left:auto}
+</style>
+</head>
+<body>
+
+<div class="auth" id="auth" hidden>
+  <form class="authcard" id="authForm" novalidate>
+    <div class="brand"><i aria-hidden="true"></i>Bubble Board</div>
+    <p class="authsub" id="authSub">Sign in to your board.</p>
+    <label id="emailRow">Email<input id="email" type="email" autocomplete="email" required></label>
+    <label id="pwRow">Password<input id="password" type="password" autocomplete="current-password" minlength="6" required></label>
+    <div class="authmsg" id="authMsg" role="status" aria-live="polite"></div>
+    <button class="primary" id="authGo" type="submit">Sign in</button>
+    <div class="authlinks"><button type="button" id="toggleMode">New here? Create an account</button><button type="button" id="forgot">Forgot password?</button></div>
+  </form>
+</div>
+<div id="app" hidden>
+<header class="top">
+  <h1 id="boardTitle" title="Click to rename">My Board</h1>
+  <div class="meta"><span id="today"></span><span class="status" id="status">Loading…</span>
+    <button type="button" id="newBtn" class="newbtn">+ Bubble</button>
+    <div class="acct"><button type="button" id="acctBtn" class="acctbtn" aria-haspopup="true" aria-expanded="false" title="Account"></button></div>
+  </div>
+</header>
+<div class="notice" id="notice" hidden></div>
+<main class="screen" id="screen" aria-label="Board"></main>
+</div>
+<div class="indicator" id="indicator" aria-hidden="true"></div>
+<div class="iline" id="iline" aria-hidden="true"></div>
+
+<script src="config.js"></script>
+<script src="vendor/supabase.js"></script>
+<script>
+(() => {
+  document.documentElement.lang = document.documentElement.lang || "en";
+  let LS = "bubble-board-site";
+  const MIN = 90;
+  const uid = () => Math.random().toString(36).slice(2, 10);
+  const BASE = { bullets: false, daily: false, ticks: true, done: true, progress: true, dates: true, numbers: false, sub: false, notes: false, added: false, feed: false, overdue: true, days: 7 };
+  const TEXTY = "input,textarea,button,a,label,.ck,.t,.ptitle,.stitle,.nt,.gw,.edit,.what,.drawer,.adder,.divider";
+  let state = { v: 6, panels: [], layout: null };
+  let openGear = null, armed = null, editing = false, dirty = false, saving = false, pending = null, gesture = false;
+  let ref = null, mode = "loading", saveTimer = null, localRev = "", focusAdder = false, popId = null;
+  const adding = {};
+
+  const $ = s => document.querySelector(s);
+  const el = (tag, attrs = {}, ...kids) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") n.className = v; else if (k === "text") n.textContent = v; else if (k === "style") n.setAttribute("style", v);
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (v === true) n.setAttribute(k, ""); else if (v !== false && v != null) n.setAttribute(k, v);
+    }
+    kids.flat().forEach(c => c != null && n.append(c));
+    return n;
+  };
+  const today0 = () => { const d = new Date(); d.setHours(0,0,0,0); return d; };
+  const dayDiff = iso => Math.round((new Date(iso + "T00:00:00") - today0()) / 864e5);
+  const fmtDue = iso => { const n = dayDiff(iso);
+    if (n < -1) return `${-n}d late`; if (n === -1) return "1d late"; if (n === 0) return "today"; if (n === 1) return "tomorrow";
+    if (n < 7) return new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short" });
+    return new Date(iso + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
+  const dueCls = iso => { const n = dayDiff(iso); return n < 0 ? "over" : n <= 2 ? "soon" : ""; };
+  $("#today").textContent = new Date().toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  const setStatus = (s, t) => { const n = $("#status"); n.dataset.s = s; n.textContent = t; };
+  const allItems = p => (p.sections || []).flatMap(s => s.items);
+  const stacked = () => matchMedia("(max-width:700px)").matches;
+
+  // ---------- layout tree ----------
+  // node: {id, kind:"panel", pid} | {id, kind:"split", dir:"row"|"col", group:bool, children:[], sizes:[]}
+  const leaf = pid => ({ id: "n-" + pid, kind: "panel", pid });
+  const split = (dir, children, sizes, group = false) => ({ id: "s" + uid(), kind: "split", dir, group, children, sizes: sizes || children.map(() => 1) });
+  const norm = n => { const t = n.sizes.reduce((a, b) => a + b, 0) || 1; n.sizes = n.sizes.map(s => s / t); };
+
+  function findParent(id, node = state.layout, parent = null, index = -1) {
+    if (node.id === id) return { node, parent, index };
+    if (node.kind === "split") for (let i = 0; i < node.children.length; i++) { const r = findParent(id, node.children[i], node, i); if (r) return r; }
+    return null;
+  }
+  const contains = (node, id) => node.id === id || (node.kind === "split" && node.children.some(c => contains(c, id)));
+
+  // collapse single-child plain splits, flatten same-direction plain splits, drop empty groups
+  function simplify(node) {
+    if (node.kind !== "split") return node;
+    const kids = [], sizes = [];
+    node.children.forEach((c, i) => {
+      const s = simplify(c);
+      if (!s) return;
+      if (s.kind === "split" && !s.group && s.dir === node.dir) { norm(s); s.children.forEach((cc, j) => { kids.push(cc); sizes.push(node.sizes[i] * s.sizes[j]); }); }
+      else { kids.push(s); sizes.push(node.sizes[i]); }
+    });
+    node.children = kids; node.sizes = sizes;
+    if (!kids.length) return null;
+    norm(node);
+    if (kids.length === 1 && !node.group) return kids[0];
+    return node;
+  }
+  function tidy() {
+    let r = simplify(state.layout);
+    if (!r) r = split("col", []);
+    if (r.kind !== "split" || r.group) r = split("col", [r]);
+    state.layout = r;
+  }
+  function removeNode(id) {
+    const f = findParent(id); if (!f || !f.parent) return null;
+    f.parent.children.splice(f.index, 1); f.parent.sizes.splice(f.index, 1);
+    return f.node;
+  }
+  function insertBeside(targetId, node, side) {
+    const f = findParent(targetId); if (!f) return;
+    const dir = side === "left" || side === "right" ? "row" : "col";
+    const after = side === "right" || side === "bottom";
+    if (!f.parent) { state.layout = split(dir, after ? [f.node, node] : [node, f.node]); return; }
+    const P = f.parent, i = f.index;
+    if (P.dir === dir) {
+      const half = P.sizes[i] / 2;
+      P.sizes[i] = half; P.children.splice(after ? i + 1 : i, 0, node); P.sizes.splice(after ? i + 1 : i, 0, half);
+    } else {
+      P.children[i] = split(dir, after ? [f.node, node] : [node, f.node]);
+    }
+  }
+  function pathTo(id, node = state.layout, acc = []) {
+    acc.push(node);
+    if (node.id === id) return acc;
+    if (node.kind === "split") for (const c of node.children) { const r = pathTo(id, c, acc); if (r) return r; }
+    acc.pop(); return null;
+  }
+  // equal shares at every level inside a group; a branch counts by how many bubbles sit side by side in it
+  function evenOut(node) {
+    if (node.kind !== "split") return;
+    const span = n => n.kind !== "split" ? 1 : n.dir === node.dir ? n.children.reduce((a, c) => a + span(c), 0) : Math.max(...n.children.map(span));
+    node.sizes = node.children.map(span); norm(node);
+    node.children.forEach(evenOut);
+  }
+  function swapNodes(aId, bId) {
+    const a = findParent(aId), b = findParent(bId);
+    if (!a?.parent || !b?.parent) return;
+    a.parent.children[a.index] = b.node; b.parent.children[b.index] = a.node;
+  }
+
+  // free-position boards (earlier version) -> rows of bubbles, groups kept
+  function treeFromPositions(panels, groups) {
+    const ents = [];
+    groups.forEach(g => { const m = panels.filter(p => p.group === g.id); if (m.length) ents.push({ x: g.x, y: g.y, w: g.w, h: g.h, node: split("row", [], [], true), members: m }); });
+    panels.filter(p => !p.group || !groups.some(g => g.id === p.group)).forEach(p => ents.push({ x: p.x || 0, y: p.y || 0, w: p.w || 300, h: p.h || 220, node: leaf(p.id) }));
+    const rowsOf = items => {
+      const rows = [];
+      [...items].sort((a, b) => a.y - b.y || a.x - b.x).forEach(it => {
+        const r = rows.find(r => it.y < r.y + 140); if (r) r.items.push(it); else rows.push({ y: it.y, items: [it] });
+      });
+      return rows.map(r => { r.items.sort((a, b) => a.x - b.x); return r; });
+    };
+    const build = (items, group) => {
+      const rows = rowsOf(items);
+      const rowNodes = rows.map(r => r.items.length === 1 ? r.items[0].node : split("row", r.items.map(i => i.node), r.items.map(i => i.w)));
+      const hs = rows.map(() => 1);
+      if (group) { group.dir = rows.length > 1 ? "col" : "row"; if (rows.length > 1) { group.children = rowNodes; group.sizes = hs; } else { group.children = rows[0].items.map(i => i.node); group.sizes = rows[0].items.map(i => i.w); } norm(group); return group; }
+      return split("col", rowNodes, hs);
+    };
+    ents.forEach(e => { if (e.members) build(e.members.map(p => ({ x: p.x || 0, y: p.y || 0, w: p.w || 300, h: p.h || 220, node: leaf(p.id) })), e.node); });
+    return build(ents);
+  }
+
+  // ---------- data shape ----------
+  function migrate(d) {
+    if (!d) return { v: 7, panels: [], layout: split("col", []) };
+    let panels = d.panels;
+    if (!Array.isArray(panels)) {
+      panels = [{ id: "goals", type: "goals", title: "Goals", goals: d.goals || [] }, { id: "due", type: "due", title: "Coming up" },
+        ...(d.columns || []).map(c => ({ id: c.id, type: "list", title: c.title, items: c.items || [] })),
+        { id: "notes", type: "notes", title: "Notes to self", notes: d.notes || [] }];
+    }
+    // every bubble is the same kind of thing; older typed bubbles become property presets
+    const clean = panels.map(p => {
+      const o = p.opts || {}, t = p.type;
+      const q = { id: p.id, title: p.title || "Untitled", sections: Array.isArray(p.sections) ? p.sections : null };
+      if (p.lastReset) q.lastReset = p.lastReset;
+      if (!t) q.opts = { ...BASE, ...o };
+      else if (t === "list") q.opts = { ...BASE, done: o.done !== false, dates: o.dates !== false, progress: o.progress !== false };
+      else if (t === "goals") { q.opts = { ...BASE, ticks: false, progress: false, dates: false, numbers: o.numbers !== false, sub: o.why !== false };
+        q.sections = [{ id: "s-" + p.id, title: "", items: (p.goals || []).map(g => ({ id: g.id, text: g.text, sub: g.why || "", done: false, due: "" })) }]; }
+      else if (t === "notes") q.opts = { ...BASE, ticks: false, progress: false, dates: false, notes: true, added: o.dates !== false };
+      else if (t === "due") q.opts = { ...BASE, ticks: false, progress: false, dates: false, feed: true, overdue: o.overdue !== false, days: o.days || 7 };
+      else q.opts = { ...BASE, ...o };
+      if (!q.sections) q.sections = [{ id: "s-" + p.id, title: "", items: (t === "notes" ? p.notes : p.items) || [] }];
+      return q;
+    });
+    let layout = d.layout;
+    if (!layout || layout.kind !== "split") {
+      const hasPos = panels.some(p => typeof p.x === "number");
+      layout = hasPos ? treeFromPositions(panels, Array.isArray(d.groups) ? d.groups : [])
+        : split("col", [split("row", panels.slice(0, 2).map(p => leaf(p.id))), split("row", panels.slice(2, -1).map(p => leaf(p.id))), ...panels.slice(-1).map(p => leaf(p.id))].filter(n => n.kind === "panel" || n.children.length));
+    }
+    const out = { v: 7, updated: d.updated || "", boardTitle: d.boardTitle || "My Board", panels: clean, layout };
+    state = out; reconcile(); return state;
+  }
+  // every panel appears exactly once in the tree
+  function reconcile() {
+    const ids = new Set(state.panels.map(p => p.id)), seen = new Set();
+    const walk = n => {
+      if (n.kind === "panel") { if (!ids.has(n.pid) || seen.has(n.pid)) return null; seen.add(n.pid); return n; }
+      const kids = [], sizes = [];
+      n.children.forEach((c, i) => { const r = walk(c); if (r) { kids.push(r); sizes.push(n.sizes?.[i] ?? 1); } });
+      n.children = kids; n.sizes = sizes; return n;
+    };
+    state.layout = walk(state.layout) || split("col", []);
+    state.panels.filter(p => !seen.has(p.id)).forEach(p => { state.layout.children.push(leaf(p.id)); state.layout.sizes.push(1 / Math.max(1, state.layout.children.length)); });
+    tidy();
+  }
+
+  // ---------- persistence ----------
+  function commit(opts = {}) {
+    state.updated = localRev = new Date().toISOString();
+    dirty = true; if (!opts.noRender) render(opts.before);
+    try { localStorage.setItem(LS, JSON.stringify(state)); } catch (e) {}
+    if (mode === "local") { if (noAccess) setStatus("error", "Only saved in this browser"); else setStatus("ok", "Saved locally"); dirty = false; return; }
+    setStatus("saving", "Saving…"); clearTimeout(saveTimer); saveTimer = setTimeout(flush, 400);
+  }
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code: "timeout" }), ms))]);
+  async function flush() {
+    if (!ref) return;
+    if (saving) { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 300); return; }
+    saving = true;
+    const rev = state.updated, body = JSON.parse(JSON.stringify(state));
+    let ok = false, retry = false;
+    try { await withTimeout(ref.set(body), 10000); ok = true; }
+    catch (e) {
+      if (e?.code === "unavailable" || e?.code === "timeout") retry = true;
+      else if (e?.code === "invalid_argument" && mode === "db") { mode = "local"; noAccess = true; dirty = false; setStatus("error", "Only saved in this browser"); }
+      else setStatus("error", "Not saved");
+    }
+    saving = false;
+    if (ok && state.updated === rev) { dirty = false; setStatus("ok", "Saved"); drainPending(); }
+    else if (ok || retry) { clearTimeout(saveTimer); saveTimer = setTimeout(flush, retry ? 1000 + Math.random() * 1000 : 50); }
+  }
+  function drainPending() { if (pending && !dirty && !editing && !gesture) { const p = pending; pending = null; applyRemote(p); } }
+  function applyRemote(data) {
+    if (!data || (data.updated || "") <= localRev) return;
+    if (dirty || saving || editing || gesture || document.activeElement?.closest?.(".adder")) { pending = data; return; }
+    const before = rects(); migrate(data); localRev = state.updated || localRev; render(before);
+  }
+  // a blank-but-useful starting board for someone opening this for the first time
+  function starter() {
+    const id = () => uid();
+    const goals = id(), todo = id(), habits = id(), due = id(), notes = id();
+    const P = (pid, title, opts, items = []) => ({ id: pid, title, opts: { ...BASE, ...opts }, sections: [{ id: id(), title: "", items: items.map(t => ({ id: id(), text: t, done: false, due: "", ts: new Date().toISOString() })) }] });
+    return {
+      v: 7, boardTitle: "My Board",
+      panels: [
+        P(goals, "Goals", { ticks: false, progress: false, dates: false, numbers: true, sub: true }, ["Click here to write your first goal"]),
+        P(due, "Coming up", { ticks: false, progress: false, dates: false, feed: true }),
+        P(todo, "To do", {}, ["Try ticking me", "Drag the ⋮⋮ grip to reorder", "Give a task a date and it appears in Coming up"]),
+        P(habits, "Daily habits", { dates: false, daily: true }, ["Unticks itself every morning"]),
+        P(notes, "Notes", { ticks: false, progress: false, dates: false, notes: true, added: true }, ["Rename anything by clicking it. Drag bubbles by their empty space, resize with the gaps between them, and use ··· for each bubble's properties."]),
+      ],
+      layout: split("col", [split("row", [leaf(goals), leaf(due)], [1, 1]), split("row", [leaf(todo), leaf(habits)], [1.4, 1]), leaf(notes)], [1, 1.1, 0.8]),
+    };
+  }
+  let noAccess = false;
+
+  // ---------- cloud storage (Supabase): one row per person, protected by row-level security ----------
+  function cloudRef(uid) {
+    const sb = window.sb;
+    const snapOf = d => ({ exists: !!d, data: () => d ? JSON.parse(JSON.stringify(d)) : undefined, metadata: { fromCache: false, hasPendingWrites: false } });
+    return {
+      async set(body) {
+        const { error } = await sb.from("boards").upsert({ user_id: uid, data: body, updated_at: new Date().toISOString() });
+        if (error) throw { code: /row-level security|permission denied/i.test(error.message || "") ? "invalid_argument" : "unavailable", message: error.message };
+      },
+      onSnapshot(next, onErr) {
+        let first = true;
+        const pull = async () => {
+          const { data, error } = await sb.from("boards").select("data").eq("user_id", uid).maybeSingle();
+          if (error) { if (first) onErr?.(error); return; }
+          first = false; next(snapOf(data ? data.data : null));
+        };
+        pull();
+        // live updates from your other devices; a slow poll covers dropped connections
+        const ch = sb.channel("board-" + uid)
+          .on("postgres_changes", { event: "*", schema: "public", table: "boards", filter: `user_id=eq.${uid}` }, payload => { if (payload.new && payload.new.data) next(snapOf(payload.new.data)); })
+          .subscribe();
+        const t = setInterval(() => { if (!document.hidden) pull(); }, 60000);
+        const onVis = () => { if (!document.hidden) pull(); };
+        document.addEventListener("visibilitychange", onVis);
+        return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVis); sb.removeChannel(ch); };
+      },
+    };
+  }
+
+  function showNotice(text, actions) {
+    const n = $("#notice");
+    n.replaceChildren(el("span", { text }), ...actions.map(([label, fn]) => el("button", { class: "seg", type: "button", text: label, onclick: () => { n.hidden = true; fn(); } })),
+      el("button", { class: "x", type: "button", "aria-label": "Dismiss", text: "×", onclick: () => { n.hidden = true; } }));
+    n.hidden = false;
+  }
+
+  async function boot(uid) {
+    LS = "bubble-board-site:" + uid;
+    try { const c = JSON.parse(localStorage.getItem(LS) || "null"); if (c) { migrate(c); localRev = state.updated || ""; } } catch (e) {}
+    render();
+    mode = "db"; ref = cloudRef(uid);
+    let firstReal = true;
+    ref.onSnapshot(sd => {
+      const data = sd.exists ? sd.data() : null;
+      if (firstReal) {
+        firstReal = false;
+        if (!data && !state.panels.length) {
+          migrate(starter()); render(); commit();
+          showNotice("New board. Moving one across from Claude?", [["Import a board file", pickImport]]);
+          return;
+        }
+        if (state.panels.length && (!data || (data.updated || "") < localRev)) { dirty = true; flush(); return; }
+        if (data && !data.layout) { const before = rects(); migrate(data); render(before); commit({ noRender: true }); return; }
+      }
+      if (data) applyRemote(data);
+      setTimeout(checkDaily, 50);
+      if (!dirty && !saving) setStatus("ok", "Synced");
+    }, () => setStatus("error", "Offline: changes kept on this device"));
+  }
+
+  // ---------- backup & import ----------
+  function downloadBackup() {
+    const name = (state.boardTitle || "board").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-") || "board";
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+    const a = el("a", { href: URL.createObjectURL(blob), download: `${name}-${todayStr()}.json` });
+    document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  function pickImport() {
+    const inp = el("input", { type: "file", accept: ".json,application/json" });
+    inp.addEventListener("change", async () => {
+      const f = inp.files && inp.files[0]; if (!f) return;
+      let d;
+      try { d = JSON.parse(await f.text()); } catch (e) { alert("That file isn't a board file (it couldn't be read as JSON)."); return; }
+      if (d && !Array.isArray(d.panels) && d.data && Array.isArray(d.data.panels)) d = d.data;   // a raw export
+      if (!d || !Array.isArray(d.panels)) { alert("That file doesn't contain a board."); return; }
+      const n = d.panels.length;
+      if (!confirm(`Replace the board on this account with "${d.boardTitle || "Imported board"}" (${n} bubble${n === 1 ? "" : "s"})?\n\nTip: download a backup first if you want to keep the current one.`)) return;
+      const before = rects(); migrate(d); localRev = ""; commit({ before });
+      setStatus("ok", "Imported");
+    });
+    inp.click();
+  }
+
+  // ---------- inline edit ----------
+  function inlineEdit(node, value, onDone, multi = false, placeholder = "") {
+    editing = true;
+    const inp = multi ? el("textarea", { class: "edit" }) : el("input", { class: "edit", type: "text", placeholder });
+    inp.value = value; node.replaceWith(inp); inp.focus(); if (!multi) inp.select();
+    let done = false;
+    const finish = save => {
+      if (done) return; done = true; editing = false;
+      const v = inp.value.trim();
+      if (save) onDone(v, v !== value); else render();
+      drainPending();
+    };
+    inp.addEventListener("keydown", e => {
+      if (e.key === "Enter" && (!multi || e.metaKey || e.ctrlKey)) { e.preventDefault(); finish(true); }
+      if (e.key === "Escape") finish(false);
+    });
+    inp.addEventListener("blur", () => finish(true));
+  }
+  const editable = (cls, tag, text, get, set, opts = {}) => {
+    const n = el(tag, { class: cls, text, title: "Click to edit" });
+    n.addEventListener("click", () => inlineEdit(n, get(), (v, changed) => {
+      if (changed && (v || opts.allowEmpty)) { set(v); commit(); } else render();
+    }, opts.multi));
+    return n;
+  };
+  const delBtn = (key, label, onDelete, cls = "x", idleText = "×") => el("button", { class: cls + (armed === key ? " arm" : ""), type: "button", "aria-label": label, text: armed === key ? "delete?" : idleText,
+    onclick: e => { e.stopPropagation(); if (armed === key) { armed = null; const b = rects(); onDelete(); commit({ before: b }); } else { armed = key; render(); } } });
+
+  // ---------- render ----------
+  const screen = $("#screen");
+  function rects() { const m = new Map(); document.querySelectorAll(".panel[data-node]").forEach(n => m.set(n.dataset.node, n.getBoundingClientRect())); return m; }
+  function animateFrom(before) {
+    if (!before || matchMedia("(prefers-reduced-motion: reduce)").matches || stacked()) return;
+    document.querySelectorAll(".panel[data-node]").forEach(n => {
+      const a = before.get(n.dataset.node), b = n.getBoundingClientRect();
+      if (!a || !b.width || !b.height) return;
+      const dx = a.left - b.left, dy = a.top - b.top, sx = a.width / b.width, sy = a.height / b.height;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < .01 && Math.abs(sy - 1) < .01) return;
+      n.style.transformOrigin = "0 0"; n.style.transition = "none";
+      n.style.transform = `translate(${dx}px,${dy}px) scale(${sx},${sy})`;
+      requestAnimationFrame(() => requestAnimationFrame(() => { n.style.transition = "transform .32s cubic-bezier(.2,.8,.2,1)"; n.style.transform = ""; }));
+      n.addEventListener("transitionend", function te(ev) { if (ev.propertyName === "transform") { n.style.transition = ""; n.style.transformOrigin = ""; n.removeEventListener("transitionend", te); } });
+    });
+  }
+  // A redraw while the mouse/finger is down would swap out the element being clicked, so wait for release.
+  let pointerDown = false, deferred = null;
+  addEventListener("pointerdown", () => { pointerDown = true; }, true);
+  const release = () => { pointerDown = false; if (deferred) setTimeout(() => { if (deferred && !pointerDown) { const b = deferred; deferred = null; render(b === true ? undefined : b); } }, 0); };
+  addEventListener("pointerup", release, true); addEventListener("pointercancel", release, true);
+
+  function render(before) {
+    if (gesture || pointerDown) { deferred = (before instanceof Map ? before : null) || deferred || true; return; }
+    deferred = null;
+    paintTitle();
+    const sy = window.scrollY;
+    const scrolls = {};
+    screen.querySelectorAll(".panel[data-node]").forEach(n => { const b = n.querySelector(".body"); if (b && b.scrollTop) scrolls[n.dataset.node] = b.scrollTop; });
+    screen.replaceChildren(state.panels.length ? nodeEl(state.layout) : el("div", { class: "placeholder-empty", text: "Nothing here yet. Use + Add to make your first bubble." }));
+    window.scrollTo(0, sy);
+    for (const [id, top] of Object.entries(scrolls)) { const b = screen.querySelector(`.panel[data-node="${id}"] .body`); if (b) b.scrollTop = top; }
+    animateFrom(before);
+    if (popId) { screen.querySelector(`.panel[data-node="${popId}"]`)?.classList.add("popin"); popId = null; }
+    if (focusAdder) { focusAdder = false; const a = document.querySelector(".adder input[type=text], .adder textarea"); if (a) { a.focus({ preventScroll: true }); a.scrollIntoView({ block: "nearest" }); } }
+  }
+  function nodeEl(node, size) {
+    let n;
+    if (node.kind === "panel") {
+      const p = state.panels.find(x => x.id === node.pid);
+      n = p ? panelNode(p) : el("div");
+    } else {
+      n = el("div", { class: `split ${node.dir}${node.group ? " group" : ""}`, "data-split": node.id });
+      if (node.group) n.append(el("span", { class: "gtools" },
+        el("button", { class: "even", type: "button", text: "even spacing", title: "Make every bubble in this group the same size",
+          onclick: () => { const b = rects(); evenOut(node); commit({ before: b }); } }),
+        el("button", { class: "ungroup", type: "button", text: "ungroup", "aria-label": "Remove this group outline",
+          onclick: () => { const b = rects(); node.group = false; tidy(); commit({ before: b }); } })));
+      node.children.forEach((c, i) => {
+        if (i) n.append(el("div", { class: "divider", "data-split": node.id, "data-i": i - 1, title: "Drag to resize · double-click to even out", role: "separator", "aria-orientation": node.dir === "row" ? "vertical" : "horizontal" }));
+        n.append(nodeEl(c, node.sizes[i]));
+      });
+    }
+    n.dataset.node = node.id;
+    if (size != null) n.style.flex = `${size} 1 0px`;
+    return n;
+  }
+
+  function panelMeta(p) {
+    if (p.opts.ticks) { const it = allItems(p), d = it.filter(i => i.done).length; if (it.length) return `${d} of ${it.length}`; }
+    if (p.opts.feed) { const n = upcoming(p).length; return n ? `${n} due` : ""; }
+    return "";
+  }
+  function panelNode(p) {
+    const node = el("section", { class: "panel", "aria-label": p.title });
+    node.append(el("header", { class: "ph" },
+      editable("ptitle", "h2", p.title, () => p.title, v => p.title = v),
+      el("span", { class: "pmeta", text: panelMeta(p) }),
+      el("span", { class: `tools${openGear === p.id ? " open" : ""}` },
+        p.opts.ticks && allItems(p).some(i => i.done) ? el("button", { class: "gear", type: "button", title: "Untick all", "aria-label": `Untick everything in ${p.title}`, text: "↺", style: "font-size:15px", onclick: () => untickAll(p) }) : null,
+        el("button", { class: "gear", type: "button", title: "Add subsection", "aria-label": `Add subsection to ${p.title}`, text: "+", style: "font-size:17px", onclick: () => addSection(p) }),
+        el("button", { class: "gear", type: "button", "aria-expanded": String(openGear === p.id), "aria-label": `Properties of ${p.title}`, title: "Properties", text: "···",
+          onclick: () => { openGear = openGear === p.id ? null : p.id; armed = null; render(); } }))));
+    if (p.opts.ticks && p.opts.progress) { const it = allItems(p); if (it.length) node.append(el("div", { class: "prog" }, el("i", { style: `width:${it.filter(i => i.done).length / it.length * 100}%` }))); }
+    if (openGear === p.id) node.append(drawer(p));
+    const body = el("div", { class: "body" });
+    bubbleBody(p, body);
+    node.append(body, ...["top","right","bottom","left"].map(side => el("div", { class: `stretch ${side}`, "data-side": side, title: "Drag to stretch across rows or columns, or back to shrink", "aria-hidden": "true" })));
+    return node;
+  }
+
+  // properties: each bubble switches on what it needs
+  function drawer(p) {
+    const o = p.opts;
+    const f = findParent("n-" + p.id);
+    const inGroup = f?.parent?.group;
+    const sw = (k, label, hint) => el("button", { class: "sw", type: "button", role: "switch", "aria-checked": String(!!o[k]), title: hint || "",
+      onclick: () => { o[k] = !o[k]; if (k === "notes" && o.notes) o.ticks = false; if (k === "ticks" && o.ticks) { o.notes = false; o.bullets = false; }
+        if (k === "bullets" && o.bullets) { o.ticks = false; o.numbers = false; } if (k === "numbers" && o.numbers) o.bullets = false; if (k === "daily" && o.daily) p.lastReset = todayStr(); commit(); } }, el("span", { text: label }), el("i"));
+    const group = (title, ...kids) => el("div", { class: "pgroup" }, el("span", { class: "lbl", text: title }), el("div", { class: "switches" }, kids.filter(Boolean)));
+    return el("div", { class: "drawer" },
+      group("Items",
+        sw("ticks", "Tick-boxes", "Turn each item into a task you can tick off"),
+        o.ticks ? sw("done", "Show finished") : null,
+        o.ticks ? sw("progress", "Progress line") : null,
+        o.ticks ? sw("daily", "Reset ticks daily", "Unticks everything at the start of each day — for habits") : null,
+        sw("dates", "Due dates", "Give items a deadline; they show in any 'Upcoming deadlines' bubble"),
+        sw("bullets", "Bullet points", "A • in front of each item"),
+        sw("numbers", "Numbered"),
+        sw("sub", "Detail line", "A second, quieter line under each item"),
+        sw("notes", "Note style", "Free-flowing paragraphs instead of a list"),
+        sw("added", "Date added")),
+      group("Upcoming deadlines",
+        sw("feed", "Show deadlines", "List dated items from every bubble here"),
+        o.feed ? sw("overdue", "Include overdue") : null,
+        o.feed ? el("div", { class: "hrow" }, ...[7, 14, 30].map(n => el("button", { class: "seg", type: "button", "aria-pressed": String(o.days === n), text: `${n} days`, onclick: () => { o.days = n; commit(); } }))) : null),
+      el("div", { class: "hrow" },
+        o.ticks ? el("button", { class: "seg", type: "button", text: "Untick all", disabled: !allItems(p).some(i => i.done), onclick: () => untickAll(p) }) : null,
+        !inGroup ? el("button", { class: "seg", type: "button", text: "Put in a group", onclick: () => {
+          const b = rects(); const g = findParent("n-" + p.id); if (!g?.parent) return;
+          g.parent.children[g.index] = split("row", [g.node], [1], true); openGear = null; tidy(); commit({ before: b }); } }) : null,
+        el("button", { class: "seg", type: "button", text: "Done", onclick: () => { openGear = null; render(); } }),
+        delBtn("panel-" + p.id, "Delete bubble", () => { state.panels = state.panels.filter(x => x !== p); removeNode("n-" + p.id); openGear = null; tidy(); }, "danger", "Delete bubble")));
+  }
+
+  const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  function untickAll(p) { allItems(p).forEach(i => { i.done = false; }); commit(); }
+  // habit bubbles: first look of a new day unticks everything
+  function checkDaily() {
+    if (dirty || saving || editing || gesture || mode === "loading") return;
+    const t = todayStr(); let changed = false;
+    state.panels.forEach(p => {
+      if (!p.opts.daily || p.lastReset === t) return;
+      if (p.lastReset) allItems(p).forEach(i => { i.done = false; });
+      p.lastReset = t; changed = true;
+    });
+    if (changed) commit();
+  }
+  setInterval(checkDaily, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkDaily(); });
+  // ---------- due-date picker ----------
+  const isoOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const isoIn = n => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + n); return isoOf(d); };
+  let duePop = null, duePopAnchor = null, dueOnClose = null;
+  function closeDue() {
+    if (!duePop) return;
+    duePop.remove(); duePop = null; duePopAnchor = null;
+    document.removeEventListener("pointerdown", dueOutside, true);
+    const c = dueOnClose; dueOnClose = null; if (c) c();
+  }
+  function dueOutside(e) { if (duePop && !duePop.contains(e.target) && !(duePopAnchor && duePopAnchor.contains(e.target))) closeDue(); }
+  function openDue(anchor, value, onPick, onClose) {
+    if (duePop && duePopAnchor === anchor) { closeDue(); return; }
+    closeDue();
+    const sel = value || "";
+    const view = sel ? new Date(sel + "T12:00:00") : new Date(); view.setDate(1); view.setHours(12);
+    const pop = el("div", { class: "duepop", role: "dialog", "aria-label": "Choose a due date" });
+    pop.addEventListener("mousedown", e => e.preventDefault());
+    const pick = v => { onPick(v); closeDue(); };
+    const quick = (label, n) => { const v = isoIn(n); return el("button", { type: "button", class: sel === v ? "on" : "", text: label, onclick: () => pick(v) }); };
+    const draw = () => {
+      const y = view.getFullYear(), m = view.getMonth(), t = isoIn(0);
+      const lead = (new Date(y, m, 1).getDay() + 6) % 7, days = new Date(y, m + 1, 0).getDate();
+      pop.replaceChildren(
+        el("div", { class: "dq" }, quick("Today", 0), quick("Tomorrow", 1), sel ? el("button", { type: "button", class: "dclear", text: "Clear", onclick: () => pick("") }) : null),
+        el("div", { class: "dm" },
+          el("button", { type: "button", class: "dnav", "aria-label": "Previous month", text: "‹", onclick: () => { view.setMonth(m - 1); draw(); } }),
+          el("span", { text: view.toLocaleDateString("en-GB", { month: "long", year: "numeric" }) }),
+          el("button", { type: "button", class: "dnav", "aria-label": "Next month", text: "›", onclick: () => { view.setMonth(m + 1); draw(); } })),
+        el("div", { class: "dg" },
+          ..."MTWTFSS".split("").map(d => el("span", { class: "dw", text: d })),
+          ...Array.from({ length: lead }, () => el("span")),
+          ...Array.from({ length: days }, (_, i) => { const iso = isoOf(new Date(y, m, i + 1, 12));
+            return el("button", { type: "button", class: `dd${iso === t ? " today" : ""}${iso === sel ? " sel" : ""}${iso < t ? " past" : ""}`, "data-iso": iso, text: String(i + 1),
+              "aria-label": new Date(y, m, i + 1).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }), onclick: () => pick(iso) }); })));
+    };
+    draw();
+    document.body.append(pop);
+    const r = anchor.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+    pop.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + "px";
+    pop.style.top = (r.bottom + 6 + h > innerHeight - 8 ? Math.max(8, r.top - h - 6) : r.bottom + 6) + "px";
+    duePop = pop; duePopAnchor = anchor; dueOnClose = onClose || null;
+    document.addEventListener("pointerdown", dueOutside, true);
+  }
+  // change the date of an item that already exists
+  function editDue(anchor, it) {
+    editing = true; let changed = false;
+    openDue(anchor, it.due, v => { if (v !== (it.due || "")) { it.due = v; changed = true; } }, () => { editing = false; if (changed) commit(); else drainPending(); });
+  }
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && duePop && !document.activeElement?.closest?.(".adder")) closeDue(); });
+  function addSection(p) {
+    const s = { id: uid(), title: "", items: [] };
+    p.sections.push(s); render();
+    const t = document.querySelector(`[data-sec="${s.id}"] .stitle`);
+    if (!t) { commit(); return; }
+    inlineEdit(t, "", v => { if (v) s.title = v; else p.sections = p.sections.filter(x => x !== s); commit(); }, false, "Subsection name");
+  }
+  function sectionHead(p, s) {
+    if (p.sections.length === 1 && !s.title) return null;
+    const open = !s.collapsed;
+    return el("div", { class: "sh" },
+      el("button", { class: "caret", type: "button", "aria-expanded": String(open), "aria-label": open ? "Collapse" : "Expand", text: "▾", onclick: () => { s.collapsed = open; commit(); } }),
+      editable("stitle", "span", s.title || "general", () => s.title, v => s.title = v, { allowEmpty: true }),
+      p.opts.ticks && s.items.length ? el("span", { class: "scount", text: `${s.items.filter(i => i.done).length}/${s.items.length}` }) : null,
+      delBtn("sec-" + s.id, `Delete ${s.title || "subsection"}`, () => { p.sections = p.sections.filter(x => x !== s); if (!p.sections.length) p.sections.push({ id: uid(), title: "", items: [] }); }));
+  }
+  function adder(p, s) {
+    const multi = p.opts.notes;
+    if (!adding[s.id]) return el("button", { class: "addline", type: "button", text: multi ? "+ note" : "+ add", onclick: () => { adding[s.id] = true; focusAdder = true; render(); } });
+    const inp = multi ? el("textarea", { rows: 2, placeholder: "Write something… (Enter to add)", "aria-label": `Add to ${s.title || p.title}` })
+                      : el("input", { type: "text", placeholder: "New item", "aria-label": `Add to ${s.title || p.title}` });
+    let due = "", finished = false;
+    const keep = e => e.preventDefault();               // clicking a chip must not pull focus out of the text box
+    let chips = null, paint = () => {};
+    if (p.opts.dates) {
+      const chip = (label, n) => el("button", { class: "dchip", type: "button", text: label, "aria-pressed": "false", onmousedown: keep,
+        onclick: () => { const v = isoIn(n); due = due === v ? "" : v; paint(); inp.focus(); } });
+      const cT = chip("Today", 0), cM = chip("Tomorrow", 1);
+      const cal = el("button", { class: "dchip cal", type: "button", title: "Pick a date from the calendar", "aria-pressed": "false", onmousedown: keep,
+        onclick: () => openDue(cal, due, v => { due = v; paint(); inp.focus(); }) });
+      paint = () => {
+        cT.setAttribute("aria-pressed", String(!!due && due === isoIn(0)));
+        cM.setAttribute("aria-pressed", String(!!due && due === isoIn(1)));
+        const custom = !!due && due !== isoIn(0) && due !== isoIn(1);
+        cal.setAttribute("aria-pressed", String(custom));
+        cal.textContent = custom ? fmtDue(due) : "Date…";
+      };
+      paint();
+      chips = el("span", { class: "dchips" }, cT, cM, cal);
+    }
+    const close = () => { finished = true; delete adding[s.id]; render(); drainPending(); };
+    const save = keepOpen => {
+      const v = inp.value.trim(); if (!v) { close(); return; }
+      finished = true;
+      s.items.push({ id: uid(), text: v, done: false, due, ts: new Date().toISOString() });
+      closeDue();
+      if (keepOpen) focusAdder = true; else delete adding[s.id];
+      commit(); drainPending();
+    };
+    const onKey = e => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); save(true); }
+      if (e.key === "Escape") { if (duePop) { closeDue(); return; } inp.value = ""; close(); }
+    };
+    inp.addEventListener("keydown", onKey);
+    const wrap = el("div", { class: "adder" }, inp, chips);
+    wrap.addEventListener("focusout", e => {
+      if (finished || wrap.contains(e.relatedTarget) || duePop?.contains(e.relatedTarget)) return;
+      if (duePop && duePopAnchor && wrap.contains(duePopAnchor)) return;
+      save(false);
+    });
+    return wrap;
+  }
+
+  function itemNode(p, s, it, i) {
+    const o = p.opts;
+    const del = el("button", { class: "x", type: "button", "aria-label": `Delete ${it.text}`, text: "×", onclick: () => { s.items = s.items.filter(x => x !== it); commit(); } });
+    const sub = o.sub ? editable("gw" + (it.sub ? "" : " ph-sub"), "span", it.sub || "add detail…", () => it.sub || "", v => it.sub = v, { allowEmpty: true }) : null;
+    const due = !o.dates ? null : it.due
+      ? el("button", { class: `d due-btn ${it.done ? "" : dueCls(it.due)}`, type: "button", text: fmtDue(it.due), title: `Due ${new Date(it.due + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}: click to change`, onclick: ev => editDue(ev.currentTarget, it) })
+      : el("button", { class: "d due-btn add-due", type: "button", text: "+ date", title: "Add a due date", onclick: ev => editDue(ev.currentTarget, it) });
+    const added = o.added && it.ts ? el("span", { class: "d", text: new Date(it.ts).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) }) : null;
+    const grip = el("span", { class: "igrip", title: "Drag to reorder, or into another bubble", "aria-hidden": "true", text: "⋮⋮" });
+    if (o.notes) return el("article", { class: "note", "data-item": it.id }, grip,
+      o.numbers ? el("span", { class: "n", text: String(i + 1) }) : o.bullets ? el("span", { class: "bul", text: "•", "aria-hidden": "true" }) : null,
+      editable("nt", "div", it.text, () => it.text, v => it.text = v, { multi: true }), sub,
+      el("div", { class: "nf" }, added, due, del));
+    let cb = null;
+    if (o.ticks) {
+      cb = el("input", { type: "checkbox", class: "ck", "aria-label": `Done: ${it.text}` }); cb.checked = !!it.done;
+      cb.addEventListener("change", () => { it.done = cb.checked; commit(); });
+    }
+    return el("li", { class: `item${o.ticks && it.done ? " done" : ""}`, "data-item": it.id }, grip, cb,
+      o.numbers ? el("span", { class: "n", text: String(i + 1) }) : o.bullets ? el("span", { class: "bul", text: "•", "aria-hidden": "true" }) : null,
+      el("div", { class: "ix" }, editable("t", "span", it.text, () => it.text, v => it.text = v), sub),
+      due, added, del);
+  }
+  function bubbleBody(p, body) {
+    const o = p.opts;
+    if (o.feed) {
+      const list = upcoming(p);
+      body.append(el("div", { class: "feed" }, list.length ? list.map(({ l, s, it }) => el("div", { class: "drow" },
+        el("button", { class: `when btn ${dueCls(it.due)}`, type: "button", text: fmtDue(it.due), title: "Change due date", onclick: ev => editDue(ev.currentTarget, it) }),
+        el("span", { class: "what", text: it.text }),
+        el("span", { class: "src", text: s.title ? `${l.title} · ${s.title}` : l.title })))
+        : el("div", { class: "empty", text: `Nothing due in the next ${o.days || 7} days.` })));
+    }
+    const onlyFeed = o.feed && !allItems(p).length && p.sections.length === 1;
+    p.sections.forEach(s => {
+      const shown = s.collapsed ? [] : s.items.filter(i => !o.ticks || o.done || !i.done);
+      const list = shown.length ? (o.notes ? el("div", { class: "notes" }, shown.map((it, i) => itemNode(p, s, it, i)))
+                                           : el("ul", { class: "items" }, shown.map((it, i) => itemNode(p, s, it, i)))) : null;
+      body.append(el("div", { class: `sec${s.items.length || onlyFeed ? "" : " empty-sec"}`, "data-sec": s.id }, sectionHead(p, s), list, s.collapsed ? null : adder(p, s)));
+    });
+  }
+  function upcoming(p) {
+    const out = [];
+    state.panels.forEach(l => l.sections.forEach(s => s.items.forEach(it => {
+      if (!it.due || it.done) return; const n = dayDiff(it.due);
+      if (n > (p.opts.days || 7) || (n < 0 && !p.opts.overdue)) return;
+      out.push({ l, s, it });
+    })));
+    return out.sort((a, b) => a.it.due.localeCompare(b.it.due));
+  }
+
+  // ---------- adding (pops in at the centre, neighbours make room) ----------
+  const newBtn = $("#newBtn");
+  newBtn.addEventListener("click", () => makePanel());
+
+  function centreLeaf() {
+    const r = screen.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + Math.min(r.height, innerHeight - r.top) / 2;
+    let best = null, bd = Infinity;
+    screen.querySelectorAll(".panel[data-node]").forEach(n => { const b = n.getBoundingClientRect();
+      const dx = Math.max(b.left - cx, 0, cx - b.right), dy = Math.max(b.top - cy, 0, cy - b.bottom), d = dx * dx + dy * dy;
+      if (d < bd) { bd = d; best = n; } });
+    return best;
+  }
+  function makePanel() {
+    const p = { id: uid(), title: "New bubble", opts: { ...BASE }, sections: [{ id: uid(), title: "", items: [] }] };
+    const before = rects();
+    const node = leaf(p.id);
+    state.panels.push(p);
+    const target = centreLeaf();
+    if (target && !stacked()) {
+      const r = target.getBoundingClientRect();
+      insertBeside(target.dataset.node, node, r.width >= r.height ? "right" : "bottom");
+    } else { state.layout.children.push(node); state.layout.sizes.push(1 / Math.max(1, state.layout.children.length)); }
+    tidy(); popId = "n-" + p.id; openGear = p.id; commit({ before });
+    const n = screen.querySelector(`.panel[data-node="n-${p.id}"]`);
+    if (stacked()) n?.scrollIntoView({ block: "center", behavior: "smooth" });
+    const t = n?.querySelector(".ptitle"); if (t) inlineEdit(t, "", v => { if (v) p.title = v; commit(); }, false, "Name this bubble");
+  }
+
+  // ---------- drag bubbles & groups ----------
+  const indicator = $("#indicator");
+  let suppressClick = false;
+  screen.addEventListener("click", e => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); suppressClick = false; } }, true);
+  document.addEventListener("touchmove", e => { if (gesture) e.preventDefault(); }, { passive: false });
+  screen.addEventListener("contextmenu", e => { if (e.target.closest(".pressing, .lifted")) e.preventDefault(); });
+
+  function zoneFor(target, x, y, allowCentre) {
+    const r = target.getBoundingClientRect();
+    const rx = (x - r.left) / r.width, ry = (y - r.top) / r.height;
+    const d = { left: rx, right: 1 - rx, top: ry, bottom: 1 - ry };
+    const side = Object.keys(d).sort((a, b) => d[a] - d[b])[0];
+    if (allowCentre && d[side] > 0.28) return { side: "centre", r };
+    return { side, r };
+  }
+  function showIndicator(z) {
+    if (!z) { indicator.classList.remove("on"); return; }
+    const { r, side } = z; let x = r.left, y = r.top, w = r.width, h = r.height;
+    if (side === "left") w /= 2; if (side === "right") { x += w / 2; w /= 2; }
+    if (side === "top") h /= 2; if (side === "bottom") { y += h / 2; h /= 2; }
+    Object.assign(indicator.style, { left: x + 3 + "px", top: y + 3 + "px", width: Math.max(0, w - 6) + "px", height: Math.max(0, h - 6) + "px" });
+    indicator.classList.add("on");
+  }
+
+  screen.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    const ig = e.target.closest(".igrip");
+    if (ig) { startItemDrag(e, ig); return; }
+    if (!e.target.closest("input,textarea,.adder")) { const ae = document.activeElement; if (ae && ae.matches?.("input,textarea")) ae.blur(); }
+    if (stacked()) return;
+    const div = e.target.closest(".divider");
+    if (div) { startResize(e, div); return; }
+    const st = e.target.closest(".stretch");
+    if (st) { startStretch(e, st); return; }
+    if (e.target.closest(TEXTY)) return;
+    let dragEl = e.target.closest(".panel");
+    if (!dragEl) { const g = e.target.closest(".split.group"); if (g && e.target === g) dragEl = g; }
+    if (!dragEl) return;
+    const nodeId = dragEl.dataset.node;
+    const touch = e.pointerType === "touch";
+    if (!touch) e.preventDefault();
+    const sx = e.clientX, sy = e.clientY;
+    let x = sx, y = sy, active = false, timer = null, drop = null;
+    try { if (!touch) dragEl.setPointerCapture(e.pointerId); } catch (_) {}
+
+    const begin = () => { active = true; gesture = true; dragEl.classList.remove("pressing"); dragEl.classList.add("lifted"); dragEl.style.pointerEvents = "none"; };
+    const update = () => {
+      dragEl.style.transform = `translate(${x - sx}px,${y - sy}px) scale(.97)`;
+      const under = document.elementFromPoint(x, y);
+      let target = under?.closest?.(".panel");
+      let allowCentre = true;
+      if (!target || dragEl.contains(target)) { const g = under?.closest?.(".split.group"); target = g && !dragEl.contains(g) && g !== dragEl ? g : null; allowCentre = false; }
+      if (target && dragEl.contains(target)) target = null;
+      if (target) { const z = zoneFor(target, x, y, allowCentre); drop = { id: target.dataset.node, side: z.side }; showIndicator(z); }
+      else { drop = null; showIndicator(null); }
+    };
+    const onMove = ev => {
+      const pt = ev.touches ? ev.touches[0] : ev; x = pt.clientX; y = pt.clientY;
+      if (!active) {
+        if (Math.hypot(x - sx, y - sy) <= (touch ? 10 : 5)) return;
+        if (touch) return finish();
+        begin();
+      }
+      update();
+    };
+    const finish = () => {
+      clearTimeout(timer); dragEl.classList.remove("pressing");
+      dragEl.removeEventListener("pointermove", onMove); dragEl.removeEventListener("pointerup", finish); dragEl.removeEventListener("lostpointercapture", finish);
+      window.removeEventListener("touchmove", onMove); window.removeEventListener("touchend", finish); window.removeEventListener("touchcancel", finish);
+      window.removeEventListener("pointercancel", cancelIdle); window.removeEventListener("blur", finish);
+      if (!active) return;
+      active = false; showIndicator(null);
+      suppressClick = true; setTimeout(() => suppressClick = false, 0);
+      const before = rects();
+      dragEl.classList.remove("lifted"); dragEl.style.pointerEvents = ""; dragEl.style.transform = "";
+      gesture = false;
+      if (!drop || drop.id === nodeId) { render(before); drainPending(); return; }
+      if (drop.side === "centre") swapNodes(nodeId, drop.id);
+      else { const moved = removeNode(nodeId); tidy(); if (moved) insertBeside(drop.id, moved, drop.side); }
+      tidy(); commit({ before });
+    };
+    const cancelIdle = () => { if (!active) finish(); };
+
+    if (touch) {
+      dragEl.classList.add("pressing"); timer = setTimeout(() => { begin(); update(); }, 320);
+      window.addEventListener("touchmove", onMove, { passive: true });
+      window.addEventListener("touchend", finish); window.addEventListener("touchcancel", finish);
+      window.addEventListener("pointercancel", cancelIdle);
+    } else {
+      dragEl.addEventListener("pointermove", onMove); dragEl.addEventListener("pointerup", finish);
+      dragEl.addEventListener("lostpointercapture", finish); window.addEventListener("blur", finish);
+    }
+  });
+
+  // ---------- stretch a bubble across neighbouring rows / columns ----------
+  // Dragging a bubble's bottom edge into the rows below lifts it out of its row and stands it beside
+  // all of those rows as one tall bubble (same idea sideways for the left/right edges). Nothing overlaps
+  // because the tree is rebuilt, never painted over.
+  const elOf = id => screen.querySelector(`[data-node="${id}"]`);
+  function stretchPlan(nodeId, side, x, y) {
+    const axis = side === "top" || side === "bottom" ? "col" : "row";
+    const fwd = side === "bottom" || side === "right";
+    const path = pathTo(nodeId); if (!path) return null;
+    let A = null, B = null, k = -1;
+    for (let m = path.length - 1; m > 0; m--) {
+      const child = path[m], anc = path[m - 1];
+      if (anc.dir === axis) { const i = anc.children.indexOf(child); if (fwd ? i < anc.children.length - 1 : i > 0) { A = anc; B = child; k = i; break; } }
+      if (anc.group) return null;                      // stay inside its white group
+    }
+    if (!A || B.id === nodeId) return null;            // already a full-width/height strip: the dividers cover that
+    const c = axis === "col" ? y : x;
+    const rs = A.children.map(ch => elOf(ch.id)?.getBoundingClientRect());
+    if (rs.some(r => !r)) return null;
+    let j = k;
+    if (fwd) { for (let i = k + 1; i < rs.length; i++) if (c > (axis === "col" ? rs[i].top : rs[i].left) + 12) j = i; }
+    else { for (let i = k - 1; i >= 0; i--) if (c < (axis === "col" ? rs[i].bottom : rs[i].right) - 12) j = i; }
+    if (j === k) return null;
+    const pr = elOf(nodeId).getBoundingClientRect(), br = rs[k], ar = elOf(A.id).getBoundingClientRect();
+    const end = axis === "col"
+      ? (Math.abs(pr.right - br.right) <= Math.abs(pr.left - br.left) ? "after" : "before")
+      : (Math.abs(pr.bottom - br.bottom) <= Math.abs(pr.top - br.top) ? "after" : "before");
+    const frac = axis === "col" ? pr.width / ar.width : pr.height / ar.height;
+    const far = rs[j];
+    const preview = axis === "col"
+      ? { left: pr.left, width: pr.width, top: fwd ? pr.top : far.top, height: fwd ? far.bottom - pr.top : pr.bottom - far.top }
+      : { top: pr.top, height: pr.height, left: fwd ? pr.left : far.left, width: fwd ? far.right - pr.left : pr.right - far.left };
+    return { A, k, j, axis, end, frac: Math.min(.85, Math.max(.12, frac)), nodeId, preview };
+  }
+  // The reverse: a bubble standing beside a stack of rows (or columns) gives some of them back.
+  function shrinkPlan(nodeId, side, x, y) {
+    const vertical = side === "top" || side === "bottom";
+    const along = vertical ? "col" : "row", perp = vertical ? "row" : "col";
+    const fwd = side === "bottom" || side === "right";
+    const f = findParent(nodeId); const R = f?.parent;
+    if (!R || R.dir !== perp || R.children.length !== 2) return null;
+    const S = R.children[1 - f.index];
+    if (S.kind !== "split" || S.dir !== along || S.children.length < 2) return null;
+    const rs = S.children.map(ch => elOf(ch.id)?.getBoundingClientRect()); if (rs.some(r => !r)) return null;
+    const c = vertical ? y : x, st = vertical ? "top" : "left", en = vertical ? "bottom" : "right";
+    const n = rs.length; let j;
+    if (fwd) { j = 0; for (let i = 0; i < n; i++) if (c > rs[i][st] + 12) j = i; if (j >= n - 1) return null; }
+    else { j = n - 1; for (let i = n - 1; i >= 0; i--) if (c < rs[i][en] - 12) j = i; if (j <= 0) return null; }
+    const pr = elOf(nodeId).getBoundingClientRect();
+    const preview = vertical
+      ? { left: pr.left, width: pr.width, top: fwd ? pr.top : rs[j].top, height: fwd ? rs[j].bottom - pr.top : pr.bottom - rs[j].top }
+      : { top: pr.top, height: pr.height, left: fwd ? pr.left : rs[j].left, width: fwd ? rs[j].right - pr.left : pr.right - rs[j].left };
+    return { shrink: true, R, S, P: f.node, pIndex: f.index, j, fwd, along, perp, preview };
+  }
+  function applyShrink(pl) {
+    const { R, S, P, pIndex, j, fwd, along, perp } = pl;
+    const rows = S.children, rS = S.sizes, sum = a => a.reduce((x, y) => x + y, 0);
+    const keep = fwd ? rows.slice(0, j + 1) : rows.slice(j), keepS = fwd ? rS.slice(0, j + 1) : rS.slice(j);
+    const rest = fwd ? rows.slice(j + 1) : rows.slice(0, j), restS = fwd ? rS.slice(j + 1) : rS.slice(0, j);
+    const inner = split(along, keep, keepS);
+    const pair = pIndex === 0 ? split(perp, [P, inner], [R.sizes[0], R.sizes[1]]) : split(perp, [inner, P], [R.sizes[0], R.sizes[1]]);
+    const C = fwd ? split(along, [pair, ...rest], [sum(keepS), ...restS]) : split(along, [...rest, pair], [...restS, sum(keepS)]);
+    C.group = R.group;
+    const g = findParent(R.id);
+    if (!g?.parent) state.layout = C; else g.parent.children[g.index] = C;
+    tidy();
+  }
+  function applyStretch(pl) {
+    if (pl.shrink) return applyShrink(pl);
+    const { A, axis, end, frac, nodeId } = pl;
+    const i0 = Math.min(pl.k, pl.j), i1 = Math.max(pl.k, pl.j);
+    const moved = removeNode(nodeId); if (!moved) return;
+    const sub = A.children.slice(i0, i1 + 1), subS = A.sizes.slice(i0, i1 + 1), total = subS.reduce((a, b) => a + b, 0);
+    const block = split(axis, sub, subS);
+    const perp = axis === "col" ? "row" : "col";
+    const R = end === "after" ? split(perp, [block, moved], [1 - frac, frac]) : split(perp, [moved, block], [frac, 1 - frac]);
+    A.children.splice(i0, i1 - i0 + 1, R); A.sizes.splice(i0, i1 - i0 + 1, total);
+    tidy();
+  }
+  function startStretch(e, handle) {
+    e.preventDefault();
+    const panel = handle.closest(".panel"), nodeId = panel.dataset.node, side = handle.dataset.side;
+    let plan = null;
+    gesture = true; handle.classList.add("on");
+    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+    const move = ev => {
+      plan = stretchPlan(nodeId, side, ev.clientX, ev.clientY) || shrinkPlan(nodeId, side, ev.clientX, ev.clientY);
+      if (plan) { const p = plan.preview; Object.assign(indicator.style, { left: p.left + 3 + "px", top: p.top + 3 + "px", width: Math.max(0, p.width - 6) + "px", height: Math.max(0, p.height - 6) + "px" }); indicator.classList.add("on"); }
+      else indicator.classList.remove("on");
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move); handle.removeEventListener("pointerup", up); handle.removeEventListener("lostpointercapture", up);
+      handle.classList.remove("on"); indicator.classList.remove("on");
+      gesture = false;
+      if (plan) { const before = rects(); applyStretch(plan); commit({ before }); } else drainPending();
+      plan = null;
+    };
+    handle.addEventListener("pointermove", move); handle.addEventListener("pointerup", up); handle.addEventListener("lostpointercapture", up);
+  }
+
+  // ---------- drag items: reorder, move between subsections, or carry into another bubble ----------
+  function findItem(p, id) { for (const s of p.sections) { const i = s.items.findIndex(x => x.id === id); if (i > -1) return { s, i }; } return null; }
+  const panelOfEl = n => state.panels.find(x => "n-" + x.id === n?.dataset.node);
+  function startItemDrag(e, grip) {
+    e.preventDefault();
+    const row = grip.closest("[data-item]"), home = row.closest(".panel");
+    const p = panelOfEl(home); if (!p) return;
+    const itemId = row.dataset.item, line = $("#iline");
+    const sx = e.clientX, sy = e.clientY; let active = false, drop = null, x = sx, y = sy, scrollTimer = null, ghost = null, lit = null;
+    gesture = true;
+    try { grip.setPointerCapture(e.pointerId); } catch (_) {}
+    const light = n => { if (lit === n) return; lit?.classList.remove("droptarget"); lit = n; n?.classList.add("droptarget"); };
+    const showLine = (left, width, top) => { Object.assign(line.style, { left: left + "px", width: width + "px", top: top + "px" }); line.classList.add("on"); };
+    const place = () => {
+      const under = document.elementFromPoint(x, y);
+      const tp = under?.closest?.(".panel");
+      if (!tp) { drop = null; line.classList.remove("on"); light(null); return; }
+      light(tp === home ? null : tp);
+      const pid = tp.dataset.node;
+      const tgt = under.closest("[data-item]");
+      if (tgt && tgt !== row) {
+        const r = tgt.getBoundingClientRect(), before = y < r.top + r.height / 2;
+        drop = { pid, sec: tgt.closest("[data-sec]").dataset.sec, item: tgt.dataset.item, before };
+        showLine(r.left, r.width, before ? r.top - 1 : r.bottom - 1); return;
+      }
+      if (tgt === row) { drop = null; line.classList.remove("on"); return; }
+      // a subsection under the pointer, or else the bubble's last subsection
+      let sec = under.closest("[data-sec]");
+      if (!sec) { const all = tp.querySelectorAll("[data-sec]"); sec = all[all.length - 1]; }
+      if (!sec) { drop = null; line.classList.remove("on"); return; }
+      const rows = [...sec.querySelectorAll("[data-item]")].filter(n => n !== row);
+      const last = rows[rows.length - 1], head = sec.querySelector(".sh");
+      const ref = (last || head || sec).getBoundingClientRect();
+      drop = { pid, sec: sec.dataset.sec, item: null, before: false };
+      showLine(ref.left, sec.getBoundingClientRect().width, last || head ? ref.bottom : ref.top);
+    };
+    const autoScroll = () => {
+      const body = (lit || home).querySelector(".body"); if (!body) return;
+      const br = body.getBoundingClientRect();
+      if (x < br.left || x > br.right) return;
+      if (y < br.top + 24 && y > br.top - 30) body.scrollTop -= 8; else if (y > br.bottom - 24 && y < br.bottom + 30) body.scrollTop += 8; else return;
+      place();
+    };
+    const move = ev => {
+      x = ev.clientX; y = ev.clientY;
+      if (!active) {
+        if (Math.hypot(x - sx, y - sy) < 4) return;
+        active = true; row.classList.add("dragging"); scrollTimer = setInterval(autoScroll, 30);
+        const it = findItem(p, itemId); const txt = it ? it.s.items[it.i].text : "";
+        ghost = el("div", { class: "ighost", text: txt.length > 60 ? txt.slice(0, 57) + "…" : txt }); document.body.append(ghost);
+      }
+      ghost.style.transform = `translate(${x + 12}px,${y + 10}px)`;
+      place();
+    };
+    const up = () => {
+      grip.removeEventListener("pointermove", move); grip.removeEventListener("pointerup", up); grip.removeEventListener("lostpointercapture", up);
+      clearInterval(scrollTimer); line.classList.remove("on"); row.classList.remove("dragging"); light(null); ghost?.remove();
+      gesture = false;
+      if (!active || !drop) { drainPending(); return; }
+      const from = findItem(p, itemId), tp = state.panels.find(z => "n-" + z.id === drop.pid);
+      const to = tp?.sections.find(z => z.id === drop.sec);
+      if (!from || !to) { drainPending(); return; }
+      const [it] = from.s.items.splice(from.i, 1);
+      let at = to.items.length;
+      if (drop.item) { const k = to.items.findIndex(z => z.id === drop.item); if (k > -1) at = drop.before ? k : k + 1; }
+      to.items.splice(at, 0, it);
+      if (to.collapsed) to.collapsed = false;
+      commit();
+    };
+    grip.addEventListener("pointermove", move); grip.addEventListener("pointerup", up); grip.addEventListener("lostpointercapture", up);
+  }
+
+  // ---------- resize with dividers ----------
+  function startResize(e, div) {
+    e.preventDefault();
+    const f = findParent(div.dataset.split); if (!f) return;
+    const node = f.node, i = +div.dataset.i;
+    const a = div.previousElementSibling, b = div.nextElementSibling;
+    const horiz = node.dir === "row";
+    const aPx = horiz ? a.offsetWidth : a.offsetHeight, bPx = horiz ? b.offsetWidth : b.offsetHeight;
+    const total = node.sizes[i] + node.sizes[i + 1], start = horiz ? e.clientX : e.clientY;
+    gesture = true; div.classList.add("on");
+    try { div.setPointerCapture(e.pointerId); } catch (_) {}
+    const move = ev => {
+      const d = (horiz ? ev.clientX : ev.clientY) - start;
+      const na = Math.max(MIN, Math.min(aPx + bPx - MIN, aPx + d));
+      node.sizes[i] = total * na / (aPx + bPx); node.sizes[i + 1] = total - node.sizes[i];
+      a.style.flex = `${node.sizes[i]} 1 0px`; b.style.flex = `${node.sizes[i + 1]} 1 0px`;
+    };
+    const up = () => {
+      div.removeEventListener("pointermove", move); div.removeEventListener("pointerup", up); div.removeEventListener("lostpointercapture", up);
+      div.classList.remove("on"); gesture = false; commit({ noRender: true }); drainPending();
+    };
+    div.addEventListener("pointermove", move); div.addEventListener("pointerup", up); div.addEventListener("lostpointercapture", up);
+  }
+  screen.addEventListener("dblclick", e => {
+    const div = e.target.closest(".divider"); if (!div) return;
+    const f = findParent(div.dataset.split); if (!f) return;
+    const i = +div.dataset.i, n = f.node, t = n.sizes[i] + n.sizes[i + 1];
+    const before = rects(); n.sizes[i] = n.sizes[i + 1] = t / 2; commit({ before });
+  });
+
+  let wasStacked = stacked();
+  addEventListener("resize", () => { if (stacked() !== wasStacked) { wasStacked = stacked(); render(); } });
+
+  // ---------- board name ----------
+  const titleEl = $("#boardTitle");
+  function paintTitle() {
+    const t = state.boardTitle || "My Board";
+    if (document.activeElement?.id !== "boardTitleEdit") titleEl.textContent = t;
+    document.title = t;
+  }
+  titleEl.addEventListener("click", () => {
+    if (titleEl.querySelector("input")) return;
+    editing = true;
+    const inp = el("input", { id: "boardTitleEdit", class: "edit", type: "text", "aria-label": "Board name", value: state.boardTitle || "My Board" });
+    titleEl.replaceChildren(inp); inp.focus(); inp.select();
+    let done = false;
+    const finish = save => {
+      if (done) return; done = true; editing = false;
+      const v = inp.value.trim();
+      if (save && v && v !== state.boardTitle) { state.boardTitle = v; commit(); } else paintTitle();
+      titleEl.textContent = state.boardTitle || "My Board";
+      drainPending();
+    };
+    inp.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); finish(true); } if (e.key === "Escape") finish(false); });
+    inp.addEventListener("blur", () => finish(true));
+  });
+
+  // ---------- sign-in ----------
+  const authEl = $("#auth"), form = $("#authForm"), msg = $("#authMsg"), go = $("#authGo");
+  let authMode = "signin", booted = false;
+  const say = (text, kind = "") => { msg.textContent = text; msg.className = "authmsg" + (kind ? " " + kind : ""); };
+  function showAuth(m) {
+    authMode = m; authEl.hidden = false; say("");
+    const pw = $("#password");
+    $("#emailRow").hidden = m === "newpass";
+    $("#pwRow").hidden = m === "reset";
+    pw.autocomplete = m === "signin" ? "current-password" : "new-password";
+    $("#pwRow").firstChild.textContent = m === "newpass" ? "New password" : "Password";
+    $("#authSub").textContent = { signin: "Sign in to your board.", signup: "Create an account. Your board is private to you.", reset: "We'll email you a link to set a new password.", newpass: "Choose a new password." }[m];
+    go.textContent = { signin: "Sign in", signup: "Create account", reset: "Send reset link", newpass: "Save password" }[m];
+    $("#toggleMode").textContent = m === "signin" ? "New here? Create an account" : "Back to sign in";
+    $("#forgot").hidden = m !== "signin";
+    $("#toggleMode").hidden = m === "newpass";
+    (m === "newpass" ? pw : $("#email")).focus();
+  }
+  $("#toggleMode").addEventListener("click", () => showAuth(authMode === "signin" ? "signup" : "signin"));
+  $("#forgot").addEventListener("click", () => showAuth("reset"));
+  const friendly = m => {
+    m = m || "";
+    if (/invalid login credentials/i.test(m)) return "Wrong email or password.";
+    if (/email not confirmed/i.test(m)) return "Confirm your email first: check your inbox for the link.";
+    if (/already registered|already been registered/i.test(m)) return "That email already has an account. Sign in instead.";
+    if (/password should be at least|weak password/i.test(m)) return "Use a password of at least 6 characters.";
+    if (/rate limit|too many/i.test(m)) return "Too many attempts. Wait a minute and try again.";
+    if (/failed to fetch|network/i.test(m)) return "Can't reach the server. Check your connection.";
+    return m || "Something went wrong. Try again.";
+  };
+  form.addEventListener("submit", async e => {
+    e.preventDefault();
+    const email = $("#email").value.trim(), password = $("#password").value;
+    if (authMode !== "newpass" && !/^\S+@\S+\.\S+$/.test(email)) { say("Enter your email address.", "err"); return; }
+    if ((authMode === "signin" || authMode === "signup" || authMode === "newpass") && password.length < 6) { say("Use a password of at least 6 characters.", "err"); return; }
+    go.disabled = true; say("…");
+    const here = location.origin + location.pathname;
+    try {
+      if (authMode === "signin") {
+        const { data, error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) throw error; start(data.session);
+      } else if (authMode === "signup") {
+        const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: here } });
+        if (error) throw error;
+        if (data.session) start(data.session);
+        else say("Nearly there: open the confirmation email we just sent, then sign in.", "ok");
+      } else if (authMode === "reset") {
+        const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: here });
+        if (error) throw error;
+        say("If that email has an account, a reset link is on its way.", "ok");
+      } else if (authMode === "newpass") {
+        const { error } = await sb.auth.updateUser({ password });
+        if (error) throw error;
+        authEl.hidden = true; setStatus("ok", "Password updated");
+      }
+    } catch (err) { say(friendly(err.message), "err"); }
+    go.disabled = false;
+  });
+
+  function start(session) {
+    if (!session || booted) return;
+    booted = true;
+    authEl.hidden = true; $("#app").hidden = false;
+    const email = session.user.email || "";
+    $("#acctBtn").textContent = (email[0] || "•");
+    boot(session.user.id);
+  }
+
+  // account menu
+  const acctBtn = $("#acctBtn");
+  let acctPop = null;
+  const closeAcct = () => { acctPop?.remove(); acctPop = null; acctBtn.setAttribute("aria-expanded", "false"); };
+  acctBtn.addEventListener("click", async e => {
+    e.stopPropagation(); if (acctPop) { closeAcct(); return; }
+    const { data } = await sb.auth.getUser();
+    acctPop = el("div", { class: "pop", role: "menu" },
+      el("div", { class: "who", text: data?.user?.email || "" }),
+      el("button", { type: "button", role: "menuitem", text: "Download a backup", onclick: () => { closeAcct(); downloadBackup(); } }),
+      el("button", { type: "button", role: "menuitem", text: "Import a board file", onclick: () => { closeAcct(); pickImport(); } }),
+      el("button", { type: "button", role: "menuitem", text: "Change password", onclick: () => { closeAcct(); showAuth("newpass"); } }),
+      el("hr"),
+      el("button", { type: "button", role: "menuitem", text: "Sign out", onclick: async () => { closeAcct(); await sb.auth.signOut(); location.reload(); } }));
+    acctBtn.after(acctPop); acctBtn.setAttribute("aria-expanded", "true");
+  });
+  document.addEventListener("click", e => { if (acctPop && !acctPop.contains(e.target) && e.target !== acctBtn) closeAcct(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeAcct(); });
+
+  (async () => {
+    const cfg = window.BOARD_CONFIG || {};
+    if (!window.supabase || !cfg.supabaseUrl || !cfg.supabaseKey || /YOUR-|PASTE/.test(cfg.supabaseUrl + cfg.supabaseKey)) {
+      showAuth("signin"); go.disabled = true;
+      say("Setup needed: add your Supabase project URL and publishable key to config.js.", "err");
+      return;
+    }
+    window.sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+    sb.auth.onAuthStateChange((event, session) => {
+      if (event === "PASSWORD_RECOVERY") { start(session); showAuth("newpass"); }
+      else if (event === "SIGNED_IN" && session) start(session);
+      else if (event === "SIGNED_OUT" && booted) location.reload();
+    });
+    const { data } = await sb.auth.getSession();
+    if (data.session) start(data.session); else if (!booted) showAuth("signin");
+  })();
+})();
+</script>
+
+</body>
+</html>
