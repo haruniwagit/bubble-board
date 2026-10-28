@@ -5,6 +5,6 @@
 // Both are designed to be public: row-level security in supabase-setup.sql is what keeps each board private.
 // NEVER put the secret / service_role key here.
 window.BOARD_CONFIG = {
-  supabaseUrl: "https://YOUR-PROJECT-REF.supabase.co",
-  supabaseKey: "PASTE-YOUR-PUBLISHABLE-KEY-HERE",
+  supabaseUrl: "https://odzlkhbxerzmxouhiaez.supabase.co",
+  supabaseKey: "sb_publishable_mUVVTYiE28mzeKQRQTqfyA_Ap7vkr6z",
 };
